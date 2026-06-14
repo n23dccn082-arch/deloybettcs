@@ -1,6 +1,7 @@
 package com.taskmanager.controller;
 
 import com.taskmanager.dto.request.CreateSprintRequest;
+import com.taskmanager.dto.request.UpdateSprintRequest;
 import com.taskmanager.dto.response.*;
 import com.taskmanager.service.*;
 import jakarta.validation.Valid;
@@ -40,6 +41,13 @@ public class SprintController {
     @PutMapping("/api/sprints/{id}/complete")
     public SprintResponse completeSprint(@PathVariable Long id, @AuthenticationPrincipal Long userId) {
         return sprintService.completeSprint(id, userId);
+    }
+
+    @PutMapping("/api/sprints/{id}")
+    public SprintResponse updateSprint(@PathVariable Long id,
+            @Valid @RequestBody UpdateSprintRequest req,
+            @AuthenticationPrincipal Long userId) {
+        return sprintService.updateSprint(id, req, userId);
     }
 
     @GetMapping("/api/sprints/{id}/burndown")

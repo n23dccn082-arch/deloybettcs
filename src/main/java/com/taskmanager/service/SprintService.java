@@ -1,6 +1,7 @@
 package com.taskmanager.service;
 
 import com.taskmanager.dto.request.CreateSprintRequest;
+import com.taskmanager.dto.request.UpdateSprintRequest;
 import com.taskmanager.dto.response.SprintResponse;
 import com.taskmanager.entity.*;
 import com.taskmanager.enums.ProjectRole;
@@ -61,6 +62,20 @@ public class SprintService {
             throw new BadRequestException("Chỉ sprint đang ACTIVE mới có thể kết thúc");
         }
         sprint.setStatus(SprintStatus.COMPLETED);
+        return toResponse(sprintRepository.save(sprint));
+    }
+
+    @Transactional
+    public SprintResponse updateSprint(Long sprintId, UpdateSprintRequest req, Long userId) {
+        Sprint sprint = getSprint(sprintId);
+        projectService.requireRole(sprint.getProject().getId(), userId, ProjectRole.MANAGER);
+        if (sprint.getStatus() == SprintStatus.COMPLETED) {
+            throw new BadRequestException("Không thể sửa sprint đã COMPLETED");
+        }
+        if (req.name() != null && !req.name().isBlank()) sprint.setName(req.name());
+        if (req.goal() != null) sprint.setGoal(req.goal());
+        if (req.startDate() != null) sprint.setStartDate(req.startDate());
+        if (req.endDate() != null) sprint.setEndDate(req.endDate());
         return toResponse(sprintRepository.save(sprint));
     }
 
