@@ -72,7 +72,7 @@ public class SprintService {
         if (sprint.getStatus() == SprintStatus.COMPLETED) {
             throw new BadRequestException("Không thể sửa sprint đã COMPLETED");
         }
-        if (req.name() != null && !req.name().isBlank()) sprint.setName(req.name());
+        if (req.name() != null) sprint.setName(req.name());
         if (req.goal() != null) sprint.setGoal(req.goal());
         if (req.startDate() != null) sprint.setStartDate(req.startDate());
         if (req.endDate() != null) sprint.setEndDate(req.endDate());

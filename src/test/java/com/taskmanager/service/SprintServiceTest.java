@@ -65,5 +65,7 @@ class SprintServiceTest {
 
         assertThat(result.name()).isEqualTo("Sprint 1 - Fixed");
         assertThat(result.endDate()).isEqualTo(LocalDate.of(2026, 6, 21));
+        assertThat(result.goal()).isEqualTo("Hoàn thành auth");
+        assertThat(result.startDate()).isEqualTo(LocalDate.of(2026, 6, 1));
     }
 }
