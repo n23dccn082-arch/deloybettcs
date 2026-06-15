@@ -2,18 +2,24 @@ package com.taskmanager.service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class EmailService {
 
-    private final JavaMailSender mailSender;
+    private final RestTemplate restTemplate;
 
-    @Value("${spring.mail.username}")
+    @Value("${brevo.api-key:}")
+    private String brevoApiKey;
+
+    @Value("${brevo.from-email:}")
     private String fromEmail;
 
     @Value("${app.frontend-url}")
@@ -22,14 +28,15 @@ public class EmailService {
     @Async
     public void sendPasswordResetEmail(String toEmail, String token) {
         try {
-            System.out.println("[EmailService] Bắt đầu gửi email reset password tới: " + toEmail + " sử dụng fromEmail: " + fromEmail);
-            var message = mailSender.createMimeMessage();
-            var helper = new MimeMessageHelper(message, true, "UTF-8");
-            helper.setFrom(fromEmail);
-            helper.setTo(toEmail);
-            helper.setSubject("TaskFlow — Đặt lại mật khẩu");
+            System.out.println("[EmailService] Bắt đầu gửi email reset password qua Brevo API tới: " + toEmail);
+            
+            if (brevoApiKey == null || brevoApiKey.isEmpty()) {
+                System.err.println("[EmailService] BREVO_API_KEY chưa được cấu hình!");
+                return;
+            }
+
             String resetLink = frontendUrl + "/reset-password?token=" + token;
-            helper.setText("""
+            String htmlContent = """
                 <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;background:#f4f5f8;border-radius:16px">
                   <div style="text-align:center;margin-bottom:24px">
                     <span style="font-size:28px;font-weight:800;color:#2563eb">TaskFlow</span>
@@ -50,11 +57,34 @@ public class EmailService {
                     </p>
                   </div>
                 </div>
-                """.formatted(resetLink), true);
-            mailSender.send(message);
-            System.out.println("[EmailService] Email đã gửi thành công tới: " + toEmail);
+                """.formatted(resetLink);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("api-key", brevoApiKey);
+
+            Map<String, Object> sender = Map.of(
+                "name", "TaskFlow",
+                "email", fromEmail
+            );
+            
+            Map<String, Object> recipient = Map.of(
+                "email", toEmail
+            );
+
+            Map<String, Object> body = Map.of(
+                "sender", sender,
+                "to", List.of(recipient),
+                "subject", "TaskFlow — Đặt lại mật khẩu",
+                "htmlContent", htmlContent
+            );
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+            ResponseEntity<String> response = restTemplate.postForEntity("https://api.brevo.com/v3/smtp/email", request, String.class);
+            
+            System.out.println("[EmailService] Kết quả gửi mail từ Brevo: " + response.getStatusCode() + " - " + response.getBody());
         } catch (Exception e) {
-            System.err.println("[EmailService] Thực tế xảy ra lỗi khi gửi email tới " + toEmail + ": " + e.getMessage());
+            System.err.println("[EmailService] Lỗi khi gửi email tới " + toEmail + " qua Brevo: " + e.getMessage());
             e.printStackTrace();
         }
     }
