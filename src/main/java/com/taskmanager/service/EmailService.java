@@ -1,6 +1,5 @@
 package com.taskmanager.service;
 
-import jakarta.mail.MessagingException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -23,6 +22,7 @@ public class EmailService {
     @Async
     public void sendPasswordResetEmail(String toEmail, String token) {
         try {
+            System.out.println("[EmailService] Bắt đầu gửi email reset password tới: " + toEmail + " sử dụng fromEmail: " + fromEmail);
             var message = mailSender.createMimeMessage();
             var helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(fromEmail);
@@ -53,8 +53,9 @@ public class EmailService {
                 """.formatted(resetLink), true);
             mailSender.send(message);
             System.out.println("[EmailService] Email đã gửi thành công tới: " + toEmail);
-        } catch (MessagingException e) {
-            System.err.println("[EmailService] Lỗi gửi email tới " + toEmail + ": " + e.getMessage());
+        } catch (Exception e) {
+            System.err.println("[EmailService] Thực tế xảy ra lỗi khi gửi email tới " + toEmail + ": " + e.getMessage());
+            e.printStackTrace();
         }
     }
 }
