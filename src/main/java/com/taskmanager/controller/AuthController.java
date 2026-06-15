@@ -30,4 +30,16 @@ public class AuthController {
                 .body(java.util.Map.of("message", e.getMessage()));
         }
     }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<?> forgotPassword(@Valid @RequestBody com.taskmanager.dto.request.ForgotPasswordRequest request) {
+        authService.forgotPassword(request);
+        return ResponseEntity.ok(java.util.Map.of("message", "Nếu email tồn tại, link đặt lại mật khẩu đã được gửi"));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<?> resetPassword(@Valid @RequestBody com.taskmanager.dto.request.ResetPasswordRequest request) {
+        authService.resetPassword(request);
+        return ResponseEntity.ok(java.util.Map.of("message", "Mật khẩu đã được đặt lại thành công"));
+    }
 }
