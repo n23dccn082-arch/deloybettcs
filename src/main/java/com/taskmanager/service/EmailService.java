@@ -1,24 +1,20 @@
 package com.taskmanager.service;
 
+import jakarta.mail.MessagingException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class EmailService {
 
-    private final RestTemplate restTemplate;
+    private final JavaMailSender mailSender;
 
-    @Value("${resend.api-key}")
-    private String resendApiKey;
-
-    @Value("${resend.from-email}")
+    @Value("${spring.mail.username}")
     private String fromEmail;
 
     @Value("${app.frontend-url}")
@@ -27,8 +23,13 @@ public class EmailService {
     @Async
     public void sendPasswordResetEmail(String toEmail, String token) {
         try {
+            var message = mailSender.createMimeMessage();
+            var helper = new MimeMessageHelper(message, true, "UTF-8");
+            helper.setFrom(fromEmail);
+            helper.setTo(toEmail);
+            helper.setSubject("TaskFlow — Đặt lại mật khẩu");
             String resetLink = frontendUrl + "/reset-password?token=" + token;
-            String htmlBody = """
+            helper.setText("""
                 <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;background:#f4f5f8;border-radius:16px">
                   <div style="text-align:center;margin-bottom:24px">
                     <span style="font-size:28px;font-weight:800;color:#2563eb">TaskFlow</span>
@@ -49,22 +50,10 @@ public class EmailService {
                     </p>
                   </div>
                 </div>
-                """.formatted(resetLink);
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(resendApiKey);
-
-            Map<String, Object> body = Map.of(
-                "from", fromEmail,
-                "to", new String[]{toEmail},
-                "subject", "TaskFlow — Đặt lại mật khẩu",
-                "html", htmlBody
-            );
-
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-            restTemplate.postForEntity("https://api.resend.com/emails", request, String.class);
-        } catch (Exception e) {
+                """.formatted(resetLink), true);
+            mailSender.send(message);
+            System.out.println("[EmailService] Email đã gửi thành công tới: " + toEmail);
+        } catch (MessagingException e) {
             System.err.println("[EmailService] Lỗi gửi email tới " + toEmail + ": " + e.getMessage());
         }
     }
