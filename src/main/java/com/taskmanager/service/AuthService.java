@@ -2,10 +2,12 @@ package com.taskmanager.service;
 
 import com.taskmanager.dto.request.*;
 import com.taskmanager.dto.response.*;
+import com.taskmanager.entity.EmailVerificationToken;
 import com.taskmanager.entity.PasswordResetToken;
 import com.taskmanager.entity.User;
 import com.taskmanager.exception.BadRequestException;
 import com.taskmanager.exception.ConflictException;
+import com.taskmanager.repository.EmailVerificationTokenRepository;
 import com.taskmanager.repository.PasswordResetTokenRepository;
 import com.taskmanager.repository.UserRepository;
 import com.taskmanager.security.JwtTokenProvider;
@@ -27,9 +29,11 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final PasswordResetTokenRepository resetTokenRepository;
+    private final EmailVerificationTokenRepository verifyTokenRepository;
     private final EmailService emailService;
 
-    public AuthResponse register(RegisterRequest request) {
+    @Transactional
+    public void register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.email())) {
             throw new ConflictException("Email đã được sử dụng");
         }
@@ -42,8 +46,28 @@ public class AuthService {
             .password(passwordEncoder.encode(request.password()))
             .build();
         user = userRepository.save(user);
-        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail());
-        return new AuthResponse(token, toSummary(user));
+        String token = generateHexToken();
+        verifyTokenRepository.save(EmailVerificationToken.builder()
+            .token(token)
+            .user(user)
+            .expiresAt(LocalDateTime.now().plusHours(24))
+            .build());
+        emailService.sendVerificationEmail(user.getEmail(), token);
+    }
+
+    @Transactional
+    public AuthResponse verifyEmail(String token) {
+        EmailVerificationToken vt = verifyTokenRepository.findByToken(token)
+            .orElseThrow(() -> new BadRequestException("Link xác nhận không hợp lệ hoặc đã hết hạn"));
+        if (vt.isExpired()) {
+            throw new BadRequestException("Link xác nhận đã hết hạn");
+        }
+        User user = vt.getUser();
+        user.setEmailVerified(true);
+        userRepository.save(user);
+        verifyTokenRepository.delete(vt);
+        String jwt = jwtTokenProvider.generateToken(user.getId(), user.getEmail());
+        return new AuthResponse(jwt, toSummary(user));
     }
 
     public AuthResponse login(LoginRequest request) {
@@ -51,6 +75,9 @@ public class AuthService {
             .orElseThrow(() -> new BadCredentialsException("Email hoặc mật khẩu không đúng"));
         if (!passwordEncoder.matches(request.password(), user.getPassword())) {
             throw new BadCredentialsException("Email hoặc mật khẩu không đúng");
+        }
+        if (!user.isEmailVerified()) {
+            throw new BadRequestException("Vui lòng xác nhận email trước khi đăng nhập");
         }
         String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail());
         return new AuthResponse(token, toSummary(user));
@@ -60,9 +87,7 @@ public class AuthService {
     public void forgotPassword(ForgotPasswordRequest request) {
         userRepository.findByEmail(request.email()).ifPresent(user -> {
             resetTokenRepository.deleteByUserId(user.getId());
-            byte[] bytes = new byte[32];
-            new SecureRandom().nextBytes(bytes);
-            String token = HexFormat.of().formatHex(bytes);
+            String token = generateHexToken();
             resetTokenRepository.save(PasswordResetToken.builder()
                 .token(token)
                 .user(user)
@@ -84,6 +109,12 @@ public class AuthService {
         userRepository.save(user);
         resetToken.setUsed(true);
         resetTokenRepository.save(resetToken);
+    }
+
+    private String generateHexToken() {
+        byte[] bytes = new byte[32];
+        new SecureRandom().nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
     }
 
     private UserSummary toSummary(User u) {

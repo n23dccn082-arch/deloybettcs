@@ -17,8 +17,15 @@ public class AuthController {
     private final AuthService authService;
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
+    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request) {
+        authService.register(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(java.util.Map.of("message", "Đăng ký thành công! Vui lòng kiểm tra email để xác nhận tài khoản."));
+    }
+
+    @GetMapping("/verify-email")
+    public ResponseEntity<AuthResponse> verifyEmail(@RequestParam String token) {
+        return ResponseEntity.ok(authService.verifyEmail(token));
     }
 
     @PostMapping("/login")
