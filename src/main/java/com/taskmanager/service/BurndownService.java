@@ -30,13 +30,17 @@ public class BurndownService {
         LocalDate end = sprint.getEndDate();
 
         if (start == null || end == null || tasks.isEmpty()) {
-            return new BurndownDataResponse(sprintId, sprint.getName(), List.of(), List.of());
+            return new BurndownDataResponse(sprintId, sprint.getName(), List.of(), List.of(), false, 0, 0);
         }
 
         List<BurndownPoint> byTask = computeBurndown(tasks, start, end, false);
         List<BurndownPoint> byPoint = computeBurndown(tasks, start, end, true);
+        boolean sprintGoalMissed = isSprintGoalMissed(byTask, tasks, end);
+        int overdueTasksNow = countOverdueTasks(tasks);
+        int overduePointsNow = sumOverduePoints(tasks);
 
-        return new BurndownDataResponse(sprintId, sprint.getName(), byTask, byPoint);
+        return new BurndownDataResponse(
+            sprintId, sprint.getName(), byTask, byPoint, sprintGoalMissed, overdueTasksNow, overduePointsNow);
     }
 
     private List<BurndownPoint> computeBurndown(List<Task> tasks,
@@ -57,6 +61,7 @@ public class BurndownService {
             if (i == totalDays - 1) ideal = 0.0;
 
             Double actual = null;
+            double overdue = 0;
             if (!day.isAfter(today)) {
                 LocalDateTime endOfDay = day.plusDays(1).atStartOfDay();
                 double remaining = tasks.stream()
@@ -64,11 +69,49 @@ public class BurndownService {
                     .mapToDouble(t -> usePoints ? (t.getStoryPoints() != null ? t.getStoryPoints() : 0) : 1)
                     .sum();
                 actual = remaining;
+                overdue = tasks.stream()
+                    .filter(t -> !isDoneByEndOfDay(t, endOfDay))
+                    .filter(t -> isOverdueOnDay(t, day))
+                    .mapToDouble(t -> usePoints ? (t.getStoryPoints() != null ? t.getStoryPoints() : 0) : 1)
+                    .sum();
             }
 
-            points.add(new BurndownPoint(day.toString(), ideal, actual));
+            points.add(new BurndownPoint(day.toString(), ideal, actual, overdue, day.equals(end)));
         }
         return points;
+    }
+
+    private boolean isSprintGoalMissed(List<BurndownPoint> byTask, List<Task> tasks, LocalDate end) {
+        LocalDate today = LocalDate.now();
+        Optional<BurndownPoint> endPoint = byTask.stream().filter(BurndownPoint::sprintEnd).findFirst();
+        if (endPoint.isPresent() && endPoint.get().actual() != null) {
+            return endPoint.get().actual() > 0;
+        }
+        if (!today.isAfter(end)) {
+            return false;
+        }
+        return tasks.stream().anyMatch(t -> t.getStatus() != TaskStatus.DONE);
+    }
+
+    private int countOverdueTasks(List<Task> tasks) {
+        LocalDate today = LocalDate.now();
+        return (int) tasks.stream()
+            .filter(t -> t.getStatus() != TaskStatus.DONE)
+            .filter(t -> isOverdueOnDay(t, today))
+            .count();
+    }
+
+    private int sumOverduePoints(List<Task> tasks) {
+        LocalDate today = LocalDate.now();
+        return tasks.stream()
+            .filter(t -> t.getStatus() != TaskStatus.DONE)
+            .filter(t -> isOverdueOnDay(t, today))
+            .mapToInt(t -> t.getStoryPoints() != null ? t.getStoryPoints() : 0)
+            .sum();
+    }
+
+    private boolean isOverdueOnDay(Task task, LocalDate day) {
+        return task.getDueDate() != null && task.getDueDate().isBefore(day);
     }
 
     private boolean isDoneByEndOfDay(Task task, LocalDateTime endOfDay) {

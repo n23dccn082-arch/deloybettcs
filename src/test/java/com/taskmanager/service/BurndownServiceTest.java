@@ -45,8 +45,29 @@ class BurndownServiceTest {
         BurndownDataResponse result = burndownService.getBurndownData(1L, 99L);
 
         assertThat(result.byTask()).hasSize(3);
-        // ideal for 3 days: day0=2.0, day1=1.0, day2=0.0
         assertThat(result.byTask().get(0).ideal()).isCloseTo(2.0, within(0.01));
         assertThat(result.byTask().get(2).ideal()).isCloseTo(0.0, within(0.01));
+    }
+
+    @Test
+    void getBurndown_overdueTask_countsOverdueOnPoint() {
+        Project proj = Project.builder().id(1L).build();
+        LocalDate start = LocalDate.of(2026, 6, 1);
+        LocalDate end = LocalDate.of(2026, 6, 3);
+        Sprint sprint = Sprint.builder().id(1L).project(proj)
+            .name("Sprint 1").startDate(start).endDate(end).status(SprintStatus.ACTIVE).build();
+
+        Task overdue = Task.builder().id(1L).status(TaskStatus.TODO).storyPoints(5)
+            .dueDate(LocalDate.of(2026, 5, 30))
+            .updatedAt(LocalDateTime.of(2026, 6, 1, 9, 0)).build();
+
+        when(sprintRepository.findById(1L)).thenReturn(Optional.of(sprint));
+        when(taskRepository.findBySprintId(1L)).thenReturn(List.of(overdue));
+        doNothing().when(projectService).requireMember(anyLong(), anyLong());
+
+        BurndownDataResponse result = burndownService.getBurndownData(1L, 99L);
+
+        assertThat(result.byTask().get(0).overdue()).isEqualTo(1.0);
+        assertThat(result.overdueTasksNow()).isEqualTo(1);
     }
 }
