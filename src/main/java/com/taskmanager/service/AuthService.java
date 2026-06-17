@@ -25,53 +25,97 @@ import java.util.HexFormat;
 @RequiredArgsConstructor
 public class AuthService {
 
+    private static final int VERIFICATION_HOURS = 24;
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final PasswordResetTokenRepository resetTokenRepository;
     private final EmailVerificationTokenRepository verifyTokenRepository;
     private final EmailService emailService;
+    private final DatabaseSchemaMigrationService schemaMigrationService;
 
     @Transactional
     public void register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.email())) {
-            throw new ConflictException("Email đã được sử dụng");
-        }
-        if (userRepository.existsByUsername(request.username())) {
-            throw new ConflictException("Username đã được sử dụng");
-        }
-        User user = User.builder()
-            .username(request.username())
-            .email(request.email())
-            .password(passwordEncoder.encode(request.password()))
-            .build();
-        user = userRepository.save(user);
+        String email = normalizeEmail(request.email());
+        String username = request.username().trim();
+
+        ensureVerifiedEmailAvailable(email);
+        ensureVerifiedUsernameAvailable(username);
+        removeLegacyUnverifiedUser(email, username);
+
+        verifyTokenRepository.findByEmailIgnoreCase(email).ifPresent(verifyTokenRepository::delete);
+
+        verifyTokenRepository.findByUsernameIgnoreCase(username).ifPresent(existing -> {
+            if (!existing.isExpired() && !existing.getEmail().equalsIgnoreCase(email)) {
+                throw new ConflictException("Username đã được sử dụng");
+            }
+            verifyTokenRepository.delete(existing);
+        });
+
         String token = generateHexToken();
         verifyTokenRepository.save(EmailVerificationToken.builder()
             .token(token)
-            .user(user)
-            .expiresAt(LocalDateTime.now().plusHours(24))
+            .username(username)
+            .email(email)
+            .passwordHash(passwordEncoder.encode(request.password()))
+            .expiresAt(LocalDateTime.now().plusHours(VERIFICATION_HOURS))
             .build());
-        emailService.sendVerificationEmail(user.getEmail(), token);
+        emailService.sendVerificationEmail(email, token);
     }
 
     @Transactional
     public AuthResponse verifyEmail(String token) {
-        EmailVerificationToken vt = verifyTokenRepository.findByToken(token)
+        EmailVerificationToken pending = verifyTokenRepository.findByToken(token)
             .orElseThrow(() -> new BadRequestException("Link xác nhận không hợp lệ hoặc đã hết hạn"));
-        if (vt.isExpired()) {
+        if (pending.isExpired()) {
+            verifyTokenRepository.delete(pending);
             throw new BadRequestException("Link xác nhận đã hết hạn");
         }
-        User user = vt.getUser();
-        user.setEmailVerified(true);
-        userRepository.save(user);
-        verifyTokenRepository.delete(vt);
+
+        String email = pending.getEmail();
+        String username = pending.getUsername();
+
+        userRepository.findByEmail(email).ifPresent(user -> {
+            if (user.isEmailVerified()) {
+                throw new ConflictException("Email đã được sử dụng");
+            }
+            if (userRepository.hasUserDependencies(user.getId())) {
+                throw new BadRequestException("Không thể xác nhận email do tài khoản cũ chưa được dọn dẹp");
+            }
+            schemaMigrationService.deleteLegacyTokensForUser(user.getId());
+            schemaMigrationService.deleteLegacyTokensForUser(user.getId());
+            userRepository.delete(user);
+        });
+
+        userRepository.findByUsername(username).ifPresent(user -> {
+            if (user.isEmailVerified()) {
+                throw new ConflictException("Username đã được sử dụng");
+            }
+            if (!user.getEmail().equalsIgnoreCase(email)) {
+                if (userRepository.hasUserDependencies(user.getId())) {
+                    throw new ConflictException("Username đã được sử dụng");
+                }
+                schemaMigrationService.deleteLegacyTokensForUser(user.getId());
+                userRepository.delete(user);
+            }
+        });
+
+        User user = User.builder()
+            .username(username)
+            .email(email)
+            .password(pending.getPasswordHash())
+            .emailVerified(true)
+            .build();
+        user = userRepository.save(user);
+        verifyTokenRepository.delete(pending);
+
         String jwt = jwtTokenProvider.generateToken(user.getId(), user.getEmail());
         return new AuthResponse(jwt, toSummary(user));
     }
 
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.email())
+        User user = userRepository.findByEmail(normalizeEmail(request.email()))
             .orElseThrow(() -> new BadCredentialsException("Email hoặc mật khẩu không đúng"));
         if (!passwordEncoder.matches(request.password(), user.getPassword())) {
             throw new BadCredentialsException("Email hoặc mật khẩu không đúng");
@@ -85,7 +129,10 @@ public class AuthService {
 
     @Transactional
     public void forgotPassword(ForgotPasswordRequest request) {
-        userRepository.findByEmail(request.email()).ifPresent(user -> {
+        userRepository.findByEmail(normalizeEmail(request.email())).ifPresent(user -> {
+            if (!user.isEmailVerified()) {
+                return;
+            }
             resetTokenRepository.deleteByUserId(user.getId());
             String token = generateHexToken();
             resetTokenRepository.save(PasswordResetToken.builder()
@@ -109,6 +156,43 @@ public class AuthService {
         userRepository.save(user);
         resetToken.setUsed(true);
         resetTokenRepository.save(resetToken);
+    }
+
+    private void ensureVerifiedEmailAvailable(String email) {
+        userRepository.findByEmail(email).ifPresent(user -> {
+            if (user.isEmailVerified()) {
+                throw new ConflictException("Email đã được sử dụng");
+            }
+        });
+    }
+
+    private void ensureVerifiedUsernameAvailable(String username) {
+        userRepository.findByUsername(username).ifPresent(user -> {
+            if (user.isEmailVerified()) {
+                throw new ConflictException("Username đã được sử dụng");
+            }
+        });
+    }
+
+    private void removeLegacyUnverifiedUser(String email, String username) {
+        userRepository.findByEmail(email).ifPresent(user -> {
+            if (!user.isEmailVerified() && !userRepository.hasUserDependencies(user.getId())) {
+                schemaMigrationService.deleteLegacyTokensForUser(user.getId());
+                userRepository.delete(user);
+            }
+        });
+        userRepository.findByUsername(username).ifPresent(user -> {
+            if (!user.isEmailVerified()
+                && !user.getEmail().equalsIgnoreCase(email)
+                && !userRepository.hasUserDependencies(user.getId())) {
+                schemaMigrationService.deleteLegacyTokensForUser(user.getId());
+                userRepository.delete(user);
+            }
+        });
+    }
+
+    private String normalizeEmail(String email) {
+        return email.trim().toLowerCase();
     }
 
     private String generateHexToken() {

@@ -68,4 +68,33 @@ class SprintServiceTest {
         assertThat(result.goal()).isEqualTo("Hoàn thành auth");
         assertThat(result.startDate()).isEqualTo(LocalDate.of(2026, 6, 1));
     }
+
+    @Test
+    void deleteSprint_completedSprint_unlinksTasksAndDeletes() {
+        Project proj = Project.builder().id(1L).build();
+        Sprint sprint = Sprint.builder().id(5L).project(proj)
+            .name("Sprint 1").status(SprintStatus.COMPLETED).build();
+
+        when(sprintRepository.findById(5L)).thenReturn(Optional.of(sprint));
+        doNothing().when(projectService).requireRole(1L, 10L, ProjectRole.MANAGER);
+
+        sprintService.deleteSprint(5L, 10L);
+
+        verify(taskRepository).clearSprintFromTasks(5L);
+        verify(sprintRepository).delete(sprint);
+    }
+
+    @Test
+    void deleteSprint_activeSprint_throwsBadRequest() {
+        Project proj = Project.builder().id(1L).build();
+        Sprint sprint = Sprint.builder().id(5L).project(proj)
+            .name("Sprint 1").status(SprintStatus.ACTIVE).build();
+
+        when(sprintRepository.findById(5L)).thenReturn(Optional.of(sprint));
+        doNothing().when(projectService).requireRole(1L, 10L, ProjectRole.MANAGER);
+
+        assertThatThrownBy(() -> sprintService.deleteSprint(5L, 10L))
+            .isInstanceOf(BadRequestException.class)
+            .hasMessageContaining("hoàn thành");
+    }
 }

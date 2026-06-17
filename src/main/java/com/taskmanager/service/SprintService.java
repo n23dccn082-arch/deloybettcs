@@ -79,6 +79,17 @@ public class SprintService {
         return toResponse(sprintRepository.save(sprint));
     }
 
+    @Transactional
+    public void deleteSprint(Long sprintId, Long userId) {
+        Sprint sprint = getSprint(sprintId);
+        projectService.requireRole(sprint.getProject().getId(), userId, ProjectRole.MANAGER);
+        if (sprint.getStatus() != SprintStatus.COMPLETED) {
+            throw new BadRequestException("Chỉ có thể xóa sprint đã hoàn thành");
+        }
+        taskRepository.clearSprintFromTasks(sprintId);
+        sprintRepository.delete(sprint);
+    }
+
     public SprintResponse getSprintById(Long sprintId, Long userId) {
         Sprint sprint = getSprint(sprintId);
         projectService.requireMember(sprint.getProject().getId(), userId);

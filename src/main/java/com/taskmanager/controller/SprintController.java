@@ -50,6 +50,13 @@ public class SprintController {
         return sprintService.updateSprint(id, req, userId);
     }
 
+    @DeleteMapping("/api/sprints/{id}")
+    public ResponseEntity<Void> deleteSprint(@PathVariable Long id,
+            @AuthenticationPrincipal Long userId) {
+        sprintService.deleteSprint(id, userId);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/api/sprints/{id}/burndown")
     public BurndownDataResponse getBurndown(@PathVariable Long id, @AuthenticationPrincipal Long userId) {
         return burndownService.getBurndownData(id, userId);

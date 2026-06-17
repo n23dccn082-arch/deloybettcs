@@ -3,6 +3,7 @@ package com.taskmanager.repository;
 import com.taskmanager.entity.Task;
 import com.taskmanager.enums.TaskStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import java.time.LocalDate;
@@ -34,4 +35,8 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     @Query("SELECT COALESCE(SUM(t.storyPoints), 0) FROM Task t WHERE t.sprint.id = :sprintId AND t.status = 'DONE'")
     long sumDoneStoryPointsBySprintId(@Param("sprintId") Long sprintId);
+
+    @Modifying
+    @Query("UPDATE Task t SET t.sprint = NULL WHERE t.sprint.id = :sprintId")
+    void clearSprintFromTasks(@Param("sprintId") Long sprintId);
 }
